@@ -84,3 +84,29 @@ Gradle 发行版若下载失败，可手工放置到 `~/.gradle/wrapper/dists/gr
 4. `logcat | grep "D PIF"` 出现 `Set 'FINGERPRINT' to ...`（注入生效）；
 5. `gr.nikolasspyr.integritycheck` → `MEETS_DEVICE_INTEGRITY ✓`
    （BASIC ✗ 为 Android 13+ 移除 legacy 判定后的预期现象）。
+
+## 五、真机验收记录（2026-10-01，172.16.0.170，全新安装）
+
+环境：模块全部卸载后重新安装（TEESimulator-RS v6.0.1-265 + 本定制版 PIF auto1），
+配置目录全清（`/data/adb/tricky_store`、`/data/adb/pif.prop` 删除后由安装流程重建）。
+
+| 验收项 | 结果 |
+|---|---|
+| 两模块 `ksud module install` 后处于激活状态 | ✅（PIF 需手工解压同步，见下） |
+| 安装时指纹自动生成（customize.sh 块） | ✅（离线时按设计回落，开机重试成功） |
+| 开机指纹保鲜（service.sh 块，35 天阈值） | ✅ 日志记录 `refreshing fingerprint (missing or stale)` → 换到新设备指纹 |
+| security_patch.txt 自动对齐（security_patch.sh 修复后） | ✅ `system/boot/vendor = 指纹 SECURITY_PATCH` |
+| PIF 注入生效（`D PIF: Set 'FINGERPRINT'...`） | ✅ |
+| TEESimulator 守护进程 + 拦截器注册 | ✅ |
+| KeyAttestation 硬件证明层 | ✅ 全绿（Google root ✓、Bootloader locked ✓、链签名校验通过） |
+
+**设备侧部署注意**：该 KernelSU 环境的 `ksud module install` 对"覆盖安装/带 update 标记"的场景
+只写入 `module.prop` 并置 `modules/<id>/update` 标记（modules_update 为空 → 重启时会被判为删除）。
+可靠做法：`unzip -o pif.zip -d /data/adb/modules/playintegrityfix/ && rm -f .../update` 后重启。
+
+**判定时效性说明**：MEETS_DEVICE_INTEGRITY 曾在 frankel_beta 指纹上稳定通过（同日更早时段），
+随后在配置完全一致的情况下转为全红（felix/frankel/lynx 三个新 Canary 均红）。autopif 生成的
+Canary 指纹是公共资源，会被 Google 持续批量封禁（上游 osm0sis README 明示 "public mass-used
+ones may get banned at any time"）；数据中心出口 IP 信誉同样影响评估。这与两层模块的配置无关——
+出现全红时先用 `autopif.sh` 换新指纹、间隔数分钟重测，持续全红属 Google 侧风控漂移，需等待或
+更换出口。
