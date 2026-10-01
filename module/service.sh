@@ -53,8 +53,11 @@ pif_fingerprint_stale() {
     local FP LINE YYMMDD BUILD_EPOCH NOW_EPOCH AGE
     FP="$(grep '^FINGERPRINT=' "$1" 2>/dev/null | head -n1 | cut -d= -f2)"
     [ -n "$FP" ] || return 1
-    LINE="$(echo "$FP" | awk -F: '{print $4}')"                       # e.g. ZP11.260821.010
-    YYMMDD="$(echo "$LINE" | sed 's/^[A-Za-z]*\([0-9]\{6\}\).*/\1/')" # 260821
+    # Fingerprint: brand/product:release/build-id/incremental:type/tags
+    #   after the first colon: <release>/<build-id>/<incremental>
+    #   build-id's 2nd dot field is the YYMMDD build date (ZP11.260821.010 -> 260821)
+    LINE="$(echo "$FP" | awk -F: '{print $2}' | cut -d/ -f2)"
+    YYMMDD="$(echo "$LINE" | cut -d. -f2)"
     echo "$YYMMDD" | grep -qE '^[0-9]{6}$' || return 1
     BUILD_EPOCH="$(busybox date -u -D '%Y%m%d' -d "20$YYMMDD" '+%s' 2>/dev/null)" || return 1
     [ -n "$BUILD_EPOCH" ] || return 1
