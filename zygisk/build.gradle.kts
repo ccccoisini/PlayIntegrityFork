@@ -11,6 +11,13 @@ tasks.register("generateModulePropChecksum") {
     val propFile = project.rootDir.resolve("module/module.prop")
     val checksumHeader = project.projectDir.resolve("src/main/cpp/checksum.h")
 
+    // Declaring these makes the task rerun whenever module.prop changes, and any
+    // checksum.h change invalidates the C++ build that includes it. Without them
+    // the task stayed up-to-date and shipped .so files carried a stale CRC,
+    // tripping the companion's tamper check against the live module.prop.
+    inputs.file(propFile)
+    outputs.file(checksumHeader)
+
     doLast {
         val bytes = propFile.readBytes()
         val crc = CRC32()
