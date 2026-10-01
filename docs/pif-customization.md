@@ -110,3 +110,44 @@ Canary 指纹是公共资源，会被 Google 持续批量封禁（上游 osm0sis
 ones may get banned at any time"）；数据中心出口 IP 信誉同样影响评估。这与两层模块的配置无关——
 出现全红时先用 `autopif.sh` 换新指纹、间隔数分钟重测，持续全红属 Google 侧风控漂移，需等待或
 更换出口。
+
+## 六、全红根因定位与修复（2026-10-01 第二次）
+
+**症状**：`gr.nikolasspyr.integritycheck` 三项全红；raw JSON 显示
+`deviceIntegrity` 无 `deviceRecognitionVerdict`，`appRecognitionVerdict` /
+`appLicensingVerdict` / `playProtectVerdict` 全为 `UNEVALUATED`
+（Google 判定"设备不可信"后直接拒绝评估，而不是评估后给低分）。
+换指纹（canary 260821 / canary 260717 / stable CP3A.260905.009）、
+对齐三层 patch、系统级 resetprop 伪造 ro.build.* 均无效。
+
+**根因**：TEESimulator-RS **v6.0.1-265** 对"带 attestation challenge 的普通证明请求"
+走 PATCH 路径（转交真实硬件），而本机 k85v1_64 只有软件 Keymaster 4.1 →
+KeyAttestation 显示 `Attestation: Version: Keymaster 4.1 / Security level: Software`。
+Android 13+ 的 MEETS_DEVICE_INTEGRITY 要求硬件级（TEE）证明，因此 Google 直接不评估。
+（上游 v6.0.1-280 起才修复 "device-property attestation 的旧门控探测真实 TEE、
+拒绝 GMS Play Integrity 硬件路径"；v6.0.1-282 起 AUTO+challenge 改走 FORGE 路径。）
+
+**修复**：
+1. 升级 TEESimulator-RS：`ksud module install TEESimulator-RS-v6.0.1-282-Release.zip` + 重启。
+   升级后 KeyAttestation 变为 `Version: KeyMint 2.0 / Security level: TrustedEnvironment`
+   （NativeCertGen 合成 4 张证书链，Google root ✓、RoT locked/Verified ✓、
+   OS/vendor/boot patch = 202609/20260905/20260905 与指纹一致）。
+2. 修复本仓库 `module/security_patch.sh` 的 resetprop 门槛：原判断
+   `resetprop --help | grep -q "compact"/"rebuild"` 在 KernelSU 的 resetprop 帮助文本中
+   永远匹配不到（且帮助输出走 stderr，会泄漏到安装日志），导致换指纹后不重启时
+   `ro.build.version.security_patch` / `ro.vendor.build.security_patch` 保持旧值，
+   形成 GMS(Java Build) / 原生 props / TEESimulator attestation 三层 patch 不一致。
+   改为 `command -v resetprop` 存在即执行 `-n` 写入，`-c` 缓存刷新尽力而为。
+
+**修复后验收（2026-10-01 11:27 / 11:38，stable `google/husky/husky:17/CP3A.260905.009/16091614`）**：
+
+| 项 | 结果 |
+|---|---|
+| MEETS_DEVICE_INTEGRITY | ✅ Pass（JSON: `deviceRecognitionVerdict=["MEETS_DEVICE_INTEGRITY"]`，`appRecognitionVerdict=PLAY_RECOGNIZED`） |
+| MEETS_BASIC_INTEGRITY | ✗（与第五节验收记录相同的预期现象） |
+| MEETS_STRONG_INTEGRITY | ✗（需未吊销 keybox / StrongBox，本环境不具备） |
+| appLicensingVerdict / playProtectVerdict | `UNEVALUATED`（设备未登录 Google 账号，Accounts: 0） |
+
+**修订第五节结论**：当时的"指纹被批量封禁 / 数据中心 IP 风控漂移"判断并非本次全红的根因；
+根因即上述证明安全级别问题。指纹封禁、出口 IP 仍是真实存在的次级风险，
+但排查顺序应为：先看 KeyAttestation 的 `Security level` 是否为 TEE，再看 raw JSON 是否 UNEVALUATED。
