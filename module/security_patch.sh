@@ -37,16 +37,16 @@ TARGET_FILE="/data/adb/tricky_store/$FILE_NAME"
 SECURITY_PATCH="$(grep "^SECURITY_PATCH=" "$PIFPROP" | cut -d= -f2)"
 SHORT_PATCH="$(echo "$SECURITY_PATCH" | awk -F- '{print $1 $2}')"
 
-# Some device might need `system=prop` to get integrity so we keep the previous behaviour
-if [ -s "$TARGET_FILE" ] && grep -q "^system=prop" "$TARGET_FILE"; then
-    SYSTEM="prop"
-else
-    SYSTEM="$SHORT_PATCH"
-fi
+# [install-and-use] Always mirror the FULL fingerprint patch date into the
+# attestation layer. The previous behaviour kept an existing `system=prop`
+# line, which made TEESimulator-RS embed the device's real (years-old) patch
+# while GMS reported the fingerprint's patch — a cross-layer mismatch that
+# failed server-side evaluation. Full dates for all three components are what
+# passed field-verification on the k85v1_64 Android 13 cloud-phone ROM.
 
 if [ "$FILE_NAME" = "security_patch.txt" ]; then
     {
-        echo "system=$SYSTEM"
+        echo "system=$SECURITY_PATCH"
         echo "boot=$SECURITY_PATCH"
         echo "vendor=$SECURITY_PATCH"
     } > "$TARGET_FILE"

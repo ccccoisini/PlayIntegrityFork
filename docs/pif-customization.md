@@ -1,0 +1,86 @@
+# PlayIntegrityFix 定制说明（inject-s-auto1）
+
+基于 `KOWX712/PlayIntegrityFix` 的 **inject-s v4.7-1**（inject_s 分支）定制，目标是
+**"安装即可使用"**：刷入模块后无需任何手工配置，指纹自动生成/保鲜，并与 TEESimulator-RS
+自动对齐 security patch。
+
+## 一、定制内容
+
+### 1. 安装时自动配置（`module/customize.sh` 追加块）
+
+- **启用 TrickyStore 同步标志**：`touch /data/adb/tricky_store/pif_auto_security_patch`
+  —— autopif.sh 生成新指纹后会自动调用 `security_patch.sh`，把指纹的 `SECURITY_PATCH`
+  写入 `/data/adb/tricky_store/security_patch.txt`（TEESimulator 的证书链补丁级来源）。
+- **立即生成新指纹**（best effort）：执行 `sh $MODPATH/autopif.sh`，输出留在
+  `$MODPATH/autopif_install.log`。离线安装时失败不中断，回落到模块自带的 pif.prop，
+  并由 service.sh 在下次开机重试。
+- KSU/APatch 环境自动把 `/data/adb/ksu/bin`、`/data/adb/ap/bin` 加入 PATH（busybox 所需）。
+
+### 2. 开机自动保鲜（`module/service.sh` 追加块）
+
+- 新增 `pif_fingerprint_stale <file> [days=35]`（`common_func.sh` 逻辑内联在 service.sh）：
+  从 `FINGERPRINT=` 行解析构建日期（Canary 构建号里的 `YYMMDD`，如 `ZP11.260821.010` →
+  `2026-08-21`），换算天数，超过 **35 天**（Canary 约 6 周过期）判为过期。
+- 开机（`sys.boot_completed=1` 后）：
+  - `/data/adb/pif.prop` 不存在 **或** 指纹过期 → 重跑 `autopif.sh`；
+  - 每次结果（成功/失败/无需刷新）追加记录到 `$MODPATH/autopif_boot.log`；
+  - 重新激活 TrickyStore 同步标志（幂等）。
+- autopif.sh 自身会在成功后 **kill GMS + Play Store**，新指纹即时生效，无需重启整机。
+- 离线开机：保留现有配置不动，下次开机重试。
+
+### 3. 运行时配置优先级（上游既有逻辑，未改动）
+
+`/data/adb/pif.prop`（autopif 生成的"当前指纹"）优先于模块目录内的 `pif.prop`（出厂回落），
+见 `zygisk/src/main/cpp/zygisk.cpp:24-25,125-128`。
+
+### 4. 去除上游自动更新（`module/module.prop`）
+
+删除了 `updateJson=...@inject_s/update.json` 行——避免 root 管理器的更新器把定制版静默
+替换为上游原版（定制内容会丢失）。如需恢复上游更新，把该行加回即可。
+
+### 5. 版本标识
+
+`version=v4.7-1-inject-s-auto1`，`versionCode=472`。
+
+## 二、与 TEESimulator-RS 的配合
+
+| 组件 | 职责 |
+|---|---|
+| PlayIntegrityFix (inject) | GMS / Play Store 进程内伪造 Build 字段（FINGERPRINT、SECURITY_PATCH 等） |
+| TEESimulator-RS (tricky_store) | keystore2 硬件证明层：keybox 伪造证书链 + 补丁级注入 |
+
+两层必须一致，否则服务端评估判红（已在真机验证）。本定制通过 `pif_auto_security_patch`
+标志 + `security_patch.sh` 自动保持一致：
+
+- `security_patch.txt` 内容形如：
+  ```
+  system=202610
+  boot=2026-09-05
+  vendor=2026-09-05
+  ```
+  （TEESimulator 同时接受 `YYYY-MM-DD` / `YYYYMMDD` / `YYYYMM`，见其
+  `AndroidDeviceUtils.parsePatchLevelValue`。）
+
+## 三、编译
+
+```sh
+cd PlayIntegrityFix
+git submodule update --init --recursive            # Dobby + local_cxa_atexit_finalize_impl
+export JAVA_HOME=~/toolchain/jdk-21.0.12.1+1
+export ANDROID_HOME=~/android-sdk                  # 需 NDK 29.x + cmake ≥ 3.30.5
+./gradlew --no-daemon :zygisk:assembleRelease copyZygiskFiles zip
+# 产物：out/PlayIntegrityFix.zip
+```
+
+注意：该工程用 **NDK 29.x**（与 TEESimulator 的 27.3 不同，两者可并存）与
+**cmake ≥ 3.30.5**（`sdkmanager "cmake;3.31.1"`）。
+Gradle 发行版若下载失败，可手工放置到 `~/.gradle/wrapper/dists/gradle-9.7.1-bin/<hash>/`。
+
+## 四、验收清单
+
+1. 刷入后（或重启后）`/data/adb/pif.prop` 存在且 `FINGERPRINT` 为近期 Canary；
+2. `$MODPATH/autopif_boot.log` 有 `fingerprint current/refreshed` 记录；
+3. `/data/adb/tricky_store/security_patch.txt` 与指纹的 `SECURITY_PATCH` 一致；
+4. `logcat | grep "D PIF"` 出现 `Set 'FINGERPRINT' to ...`（注入生效）；
+5. `gr.nikolasspyr.integritycheck` → `MEETS_DEVICE_INTEGRITY ✓`
+   （BASIC ✗ 为 Android 13+ 移除 legacy 判定后的预期现象）。

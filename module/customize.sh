@@ -77,3 +77,22 @@ for pkg in com.google.android.gms com.android.vending; do
         done
     done
 done
+
+# ---- [install-and-use] Auto setup (TEESimulator-RS companion) ----
+# 1) Enable the TrickyStore/TEESimulator security-patch auto-sync flag, so every
+#    fingerprint generated below is mirrored into /data/adb/tricky_store/security_patch.txt.
+# 2) Generate a fresh Pixel Canary fingerprint right away (best effort). The
+#    shipped pif.prop stays as fallback when the device is offline.
+if [ "$KSU" = "true" ] || [ "$APATCH" = "true" ]; then
+    export PATH="/data/adb/ksu/bin:/data/adb/ap/bin:$PATH"
+fi
+if [ -d /data/adb/tricky_store ]; then
+    touch /data/adb/tricky_store/pif_auto_security_patch
+fi
+ui_print "- Generating a fresh Pixel fingerprint (best effort)..."
+if sh "$MODPATH/autopif.sh" > "$MODPATH/autopif_install.log" 2>&1; then
+    ui_print "  $(grep '^FINGERPRINT=' /data/adb/pif.prop 2>/dev/null | head -n1 | cut -c1-70)"
+else
+    ui_print "  offline? the shipped pif.prop stays active;"
+    ui_print "  service.sh retries automatically at next boot."
+fi
