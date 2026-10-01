@@ -70,14 +70,17 @@ EOF
 
 PROPS="ro.build.version.security_patch ro.vendor.build.security_patch"
 
-if resetprop --help | grep -q "compact" 2>&1; then
+# Apply at runtime whenever resetprop exists (Magisk / KernelSU / APatch).
+# The old gate grepped `resetprop --help` for "compact"/"rebuild"; neither
+# string appears in Magisk's or KernelSU's help text, so on KernelSU the props
+# silently stayed stale after a fingerprint change (system.prop only applies
+# on the next boot), leaving GMS' Java Build patch, the native props and the
+# TEESimulator attestation patch out of sync across the evaluation.
+if command -v resetprop >/dev/null 2>&1; then
     for PROP in $PROPS; do
-        resetprop -n "$PROP" "$SECURITY_PATCH"
+        resetprop -n "$PROP" "$SECURITY_PATCH" >/dev/null 2>&1 || true
+        CTX="$(resetprop -Z "$PROP" 2>/dev/null)"
+        [ -n "$CTX" ] && resetprop -c "$CTX" >/dev/null 2>&1
     done
     resetprop -c >/dev/null 2>&1 || true
-elif resetprop --help | grep -q "rebuild" 2>&1; then
-    for PROP in $PROPS; do
-        resetprop -n "$PROP" "$SECURITY_PATCH"
-        resetprop -c $(resetprop -Z "$PROP") >/dev/null 2>&1 || true
-    done
 fi
