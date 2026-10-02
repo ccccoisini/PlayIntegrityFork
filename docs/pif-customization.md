@@ -151,3 +151,18 @@ Android 13+ 的 MEETS_DEVICE_INTEGRITY 要求硬件级（TEE）证明，因此 G
 **修订第五节结论**：当时的"指纹被批量封禁 / 数据中心 IP 风控漂移"判断并非本次全红的根因；
 根因即上述证明安全级别问题。指纹封禁、出口 IP 仍是真实存在的次级风险，
 但排查顺序应为：先看 KeyAttestation 的 `Security level` 是否为 TEE，再看 raw JSON 是否 UNEVALUATED。
+
+## 七、默认指纹改为 stable，安装即通过（2026-10-01）
+
+- `module/pif.prop` 默认改为已验证的 stable 指纹
+  `google/husky/husky:17/CP3A.260905.009/16091614:user/release-keys`（Pixel 8 Pro，
+  SECURITY_PATCH=2026-09-05），不再随安装拉取随机 Pixel Canary。
+- `customize.sh`：安装时把 shipped pif.prop 写入 `/data/adb/pif.prop`（仅当缺失或当前为
+  `:CANARY/` 指纹时覆盖；已有的非 canary 配置保留），随后立即执行 `security_patch.sh`
+  完成三层 patch 对齐；`autopif.sh` 保留为手动刷新入口。
+- `service.sh`：开机先用 shipped 默认补齐缺失的 `/data/adb/pif.prop`；35 天过期刷新仅对
+  **canary** 指纹生效，stable 指纹永不被自动替换。
+- 验收（2026-10-01 17:26–17:28 EDT）：删除 `/data/adb/pif.prop` 模拟全新安装 → 开机日志
+  `[+] seeded /data/adb/pif.prop from shipped stable fingerprint` → 三层 patch=2026-09-05 →
+  `MEETS_DEVICE_INTEGRITY` ✓（与第六节相同的配套要求：TEESimulator-RS ≥ v6.0.1-572 /
+  上游 307 线，硬件级证明）。
