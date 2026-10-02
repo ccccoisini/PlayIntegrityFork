@@ -1,7 +1,7 @@
-FINGERPRINT=google/oriole_beta/oriole:CANARY/ZP11.260618.005/15760424:user/release-keys
+FINGERPRINT=google/husky/husky:17/CP3A.260905.009/16091614:user/release-keys
 MANUFACTURER=Google
-MODEL=Pixel 6
-SECURITY_PATCH=2026-07-05
+MODEL=Pixel 8 Pro
+SECURITY_PATCH=2026-09-05
 spoofBuild=true
 spoofProps=false
 spoofProvider=false

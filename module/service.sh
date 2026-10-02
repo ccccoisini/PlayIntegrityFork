@@ -41,9 +41,12 @@ resetprop_if_diff vendor.boot.vbmeta.device_state locked
 resetprop_if_diff sys.oem_unlock_allowed 0
 
 # ---- [install-and-use] Boot auto refresh (TEESimulator-RS companion) ----
-# - No /data/adb/pif.prop, or a stale Pixel Canary fingerprint (older than 35
-#   days; they expire in about 6 weeks) -> regenerate via autopif.sh.
-# - autopif.sh then syncs the fingerprint's SECURITY_PATCH into
+# - Missing /data/adb/pif.prop -> seed from the shipped stable pif.prop, or
+#   fall back to autopif.sh when the shipped default is absent.
+# - Stale *Pixel Canary* fingerprint (older than 35 days; canaries expire in
+#   about 6 weeks) -> regenerate via autopif.sh. Stable fingerprints are never
+#   auto-replaced, so a fresh install keeps passing MEETS_DEVICE_INTEGRITY.
+# - autopif.sh syncs the fingerprint's SECURITY_PATCH into
 #   /data/adb/tricky_store/security_patch.txt (pif_auto_security_patch flag)
 #   and restarts GMS/Play Store, so the new fingerprint takes effect at once.
 # - Offline boots keep the existing config untouched.
@@ -66,10 +69,29 @@ pif_fingerprint_stale() {
     [ "$AGE" -gt 35 ]
 }
 
+pif_fingerprint_is_canary() {
+    grep '^FINGERPRINT=' "$1" 2>/dev/null | head -n1 | grep -q ':CANARY/'
+}
+
 {
     echo "===== $(date) ====="
-    if [ ! -s /data/adb/pif.prop ] || pif_fingerprint_stale /data/adb/pif.prop; then
-        echo "[*] refreshing fingerprint (missing or stale)..."
+    # Seed from the shipped stable fingerprint when nothing is installed yet
+    # (fresh install / wiped /data), so boot works without any network fetch.
+    if [ ! -s /data/adb/pif.prop ] && [ -s "$MODPATH/pif.prop" ]; then
+        cp -af "$MODPATH/pif.prop" /data/adb/pif.prop
+        echo "[+] seeded /data/adb/pif.prop from shipped stable fingerprint"
+    fi
+    if [ ! -s /data/adb/pif.prop ]; then
+        echo "[*] no pif.prop and no shipped default; fetching via autopif..."
+        if sh "$MODPATH/autopif.sh"; then
+            echo "[+] fingerprint refreshed: $(grep '^FINGERPRINT=' /data/adb/pif.prop 2>/dev/null | head -n1)"
+        else
+            echo "[!] autopif failed; keeping existing config"
+        fi
+    elif pif_fingerprint_is_canary /data/adb/pif.prop && pif_fingerprint_stale /data/adb/pif.prop; then
+        # Only Pixel Canaries expire (~6 weeks) and need a refresh; a stable
+        # fingerprint is left alone so installs keep passing out of the box.
+        echo "[*] stale Pixel Canary fingerprint; refreshing..."
         if sh "$MODPATH/autopif.sh"; then
             echo "[+] fingerprint refreshed: $(grep '^FINGERPRINT=' /data/adb/pif.prop 2>/dev/null | head -n1)"
         else

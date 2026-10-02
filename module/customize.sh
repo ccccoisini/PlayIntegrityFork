@@ -79,20 +79,34 @@ for pkg in com.google.android.gms com.android.vending; do
 done
 
 # ---- [install-and-use] Auto setup (TEESimulator-RS companion) ----
-# 1) Enable the TrickyStore/TEESimulator security-patch auto-sync flag, so every
-#    fingerprint generated below is mirrored into /data/adb/tricky_store/security_patch.txt.
-# 2) Generate a fresh Pixel Canary fingerprint right away (best effort). The
-#    shipped pif.prop stays as fallback when the device is offline.
+# 1) Enable the TrickyStore/TEESimulator security-patch auto-sync flag.
+# 2) Install the SHIPPED stable fingerprint as /data/adb/pif.prop instead of
+#    fetching a random Pixel Canary: public canaries get revoked by Google in
+#    waves and come back all-red, while the shipped stable Pixel build is
+#    verified to pass MEETS_DEVICE_INTEGRITY out of the box. An existing
+#    non-canary pif.prop (a deliberate user choice) is left untouched;
+#    autopif.sh remains available for a manual refresh (WebUI / shell).
 if [ "$KSU" = "true" ] || [ "$APATCH" = "true" ]; then
     export PATH="/data/adb/ksu/bin:/data/adb/ap/bin:$PATH"
 fi
 if [ -d /data/adb/tricky_store ]; then
     touch /data/adb/tricky_store/pif_auto_security_patch
 fi
-ui_print "- Generating a fresh Pixel fingerprint (best effort)..."
-if sh "$MODPATH/autopif.sh" > "$MODPATH/autopif_install.log" 2>&1; then
+pif_is_canary() {
+    grep '^FINGERPRINT=' "$1" 2>/dev/null | head -n1 | grep -q ':CANARY/'
+}
+if [ -s "$MODPATH/pif.prop" ]; then
+    if [ ! -s /data/adb/pif.prop ] || pif_is_canary /data/adb/pif.prop; then
+        cp -af "$MODPATH/pif.prop" /data/adb/pif.prop
+        ui_print "- Installed shipped stable fingerprint:"
+    else
+        ui_print "- Keeping existing pif.prop fingerprint:"
+    fi
     ui_print "  $(grep '^FINGERPRINT=' /data/adb/pif.prop 2>/dev/null | head -n1 | cut -c1-70)"
+fi
+ui_print "- Syncing SECURITY_PATCH into TEESimulator/TrickyStore..."
+if sh "$MODPATH/security_patch.sh" > "$MODPATH/autopif_install.log" 2>&1; then
+    ui_print "  system/boot/vendor = $(grep '^SECURITY_PATCH=' /data/adb/pif.prop 2>/dev/null | cut -d= -f2)"
 else
-    ui_print "  offline? the shipped pif.prop stays active;"
-    ui_print "  service.sh retries automatically at next boot."
+    ui_print "  sync skipped (see autopif_install.log); service.sh retries at boot."
 fi
